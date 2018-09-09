@@ -2,7 +2,7 @@ import functools
 import hashlib
 import math
 import os
-import pathlib
+from pathlib import Path
 import random
 import string
 import tempfile
@@ -11,8 +11,8 @@ import time
 import MySQLdb.cursors
 import flask
 
-static_folder = pathlib.Path(__file__).resolve().parent.parent / 'public'
-icons_folder = static_folder / 'icons'
+static_folder: Path = Path(__file__).resolve().parent.parent / 'public'
+icons_folder: Path = static_folder / 'icons'
 app = flask.Flask(__name__, static_folder=str(static_folder), static_url_path='')
 app.secret_key = 'tonymoris'
 avatar_max_size = 1 * 1024 * 1024
@@ -61,6 +61,21 @@ def get_initialize():
     cur.execute('DELETE FROM channel WHERE id > 10')
     cur.execute('DELETE FROM message WHERE id > 10000')
     cur.execute('DELETE FROM haveread')
+
+    if not icons_folder.is_dir():
+        icons_folder.mkdir()
+    for path in icons_folder.glob('*'):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+    cur.execute('SELECT name, data FROM image')
+    for row in cur.fetchall():
+        path = icons_folder / row['name']
+        if path.exists():
+            continue
+        with path.open('wb') as f:
+            f.write(row['data'])
     cur.close()
     return '', 204
 
@@ -363,7 +378,8 @@ def post_profile():
                 avatar_data = data
 
     if avatar_name and avatar_data:
-        cur.execute('INSERT INTO image (name, data) VALUES (%s, _binary %s)', (avatar_name, avatar_data))
+        with (icons_folder / avatar_name).open('wb') as f:
+            f.write(avatar_data)
         cur.execute('UPDATE user SET avatar_icon = %s WHERE id = %s', (avatar_name, user_id))
 
     if display_name:
@@ -380,18 +396,6 @@ def ext2mime(ext):
     if ext == '.gif':
         return 'image/gif'
     return ''
-
-
-@app.route('/icons/<file_name>')
-def get_icon(file_name):
-    cur = dbh().cursor()
-    cur.execute('SELECT * FROM image WHERE name = %s', (file_name,))
-    row = cur.fetchone()
-    ext = os.path.splitext(file_name)[1] if '.' in file_name else ''
-    mime = ext2mime(ext)
-    if row and mime:
-        return flask.Response(row['data'], mimetype=mime)
-    flask.abort(404)
 
 
 if __name__ == '__main__':
